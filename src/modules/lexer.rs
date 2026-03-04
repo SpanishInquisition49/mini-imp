@@ -1,43 +1,9 @@
-use logos::{Lexer, Logos, Skip};
-use std::num::ParseIntError;
+use core::fmt;
+use logos::Logos;
 
-#[derive(Default, Debug, Clone, PartialEq)]
-pub enum LexingError {
-    InvalidInteger(String),
-    NonAsciiCharacter(char),
-    #[default]
-    Other,
-}
-
-/// Error type returned by calling `lex.slice().parse()` to u8.
-impl From<ParseIntError> for LexingError {
-    fn from(err: ParseIntError) -> Self {
-        use std::num::IntErrorKind::*;
-        match err.kind() {
-            PosOverflow | NegOverflow => LexingError::InvalidInteger("overflow error".to_owned()),
-            _ => LexingError::InvalidInteger("other error".to_owned()),
-        }
-    }
-}
-
-impl LexingError {
-    fn from_lexer(lex: &mut logos::Lexer<'_, Token>) -> Self {
-        LexingError::NonAsciiCharacter(lex.slice().chars().next().unwrap())
-    }
-}
-
-fn newline_callback(lex: &mut Lexer<Token>) -> Skip {
-    lex.extras.0 += 1;
-    lex.extras.1 = lex.span().end;
-    Skip
-}
-
-#[derive(Logos, Debug, PartialEq)]
-#[logos(error(LexingError, LexingError::from_lexer))]
-#[logos(extras = (usize, usize))]
-#[logos(skip(r"[\n]+", newline_callback))]
-#[logos(skip r"[ \t]+")]
+#[derive(Logos, Debug, Clone, PartialEq)]
 pub enum Token {
+    Error,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -55,19 +21,17 @@ pub enum Token {
     #[token("not")]
     Not,
     #[token("<")]
-    Less,
+    LowerThan,
     #[token(">")]
-    Greater,
-    #[token(":")]
-    Colon,
-    #[token("=")]
-    Equal,
+    GreaterThan,
+    #[token(":=")]
+    Assign,
     #[token("true")]
     True,
     #[token("false")]
     False,
     #[token(";")]
-    Comma,
+    SemiColon,
     #[token("if")]
     If,
     #[token("then")]
@@ -90,8 +54,46 @@ pub enum Token {
     Output,
     #[token("as")]
     As,
-    #[regex(r"[a-zA-Z]+", |lex| {String::from(lex.slice())})]
-    Word(String),
-    #[regex(r"[0-9]+", |lex| lex.slice().parse())]
-    Integer(u64),
+    #[regex(r"[a-zA-Z][a-zA-Z0-9]*", |lex| lex.slice().to_string())]
+    Identifier(String),
+    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
+    Integer(i64),
+    #[regex(r"[ \t\n\f]+", logos::skip)]
+    Whitespace,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Error => write!(f, "<Error>"),
+            Token::LParen => write!(f, "("),
+            Token::RParen => write!(f, ")"),
+            Token::Plus => write!(f, "+"),
+            Token::Minus => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::And => write!(f, "and"),
+            Token::Or => write!(f, "or"),
+            Token::Not => write!(f, "not"),
+            Token::LowerThan => write!(f, "<"),
+            Token::GreaterThan => write!(f, ">"),
+            Token::Assign => write!(f, ":="),
+            Token::True => write!(f, "true"),
+            Token::False => write!(f, "false"),
+            Token::SemiColon => write!(f, ";"),
+            Token::If => write!(f, "if"),
+            Token::Then => write!(f, "then"),
+            Token::Else => write!(f, "else"),
+            Token::While => write!(f, "while"),
+            Token::Do => write!(f, "do"),
+            Token::Def => write!(f, "def"),
+            Token::Main => write!(f, "main"),
+            Token::With => write!(f, "with"),
+            Token::Input => write!(f, "input"),
+            Token::Output => write!(f, "output"),
+            Token::As => write!(f, "as"),
+            Token::Identifier(w) => write!(f, "{w}"),
+            Token::Integer(i) => write!(f, "{i}"),
+            Token::Whitespace => write!(f, "<Whitespace>"),
+        }
+    }
 }
