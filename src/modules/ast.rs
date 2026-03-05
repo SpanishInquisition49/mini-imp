@@ -41,6 +41,7 @@ pub enum Cmd {
     Seq(Box<Cmd>, Box<Cmd>),
     Ite(Box<BoolExpr>, Box<Cmd>, Box<Cmd>),
     While(Box<BoolExpr>, Box<Cmd>),
+    Print(Box<Expr>),
 }
 
 impl Cmd {
@@ -68,6 +69,10 @@ impl Cmd {
                 while guard.eval(env)? {
                     body.eval(env)?
                 }
+                Ok(())
+            }
+            Cmd::Print(expr) => {
+                println!("{}", expr.eval(env)?);
                 Ok(())
             }
         }

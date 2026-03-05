@@ -96,7 +96,11 @@ where
             .then(cmd.clone())
             .map(|(b, c)| Cmd::While(Box::new(b), Box::new(c)));
 
-        choice((block, if_cmd, while_cmd, assign))
+        let print_cmd = just(Token::Print)
+            .ignore_then(expr.clone())
+            .map(|e| Cmd::Print(Box::new(e)));
+
+        choice((block, if_cmd, while_cmd, assign, print_cmd))
             .then(just(Token::SemiColon).ignore_then(cmd.clone()).or_not())
             .map(|(c, rest)| match rest {
                 Some(r) => Cmd::Seq(Box::new(c), Box::new(r)),

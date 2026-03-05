@@ -54,6 +54,8 @@ pub enum Token {
     Output,
     #[token("as")]
     As,
+    #[token("print")]
+    Print,
     #[regex(r"[a-zA-Z][a-zA-Z0-9]*", |lex| lex.slice().to_string())]
     Identifier(String),
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
@@ -91,6 +93,7 @@ impl fmt::Display for Token {
             Token::Input => write!(f, "input"),
             Token::Output => write!(f, "output"),
             Token::As => write!(f, "as"),
+            Token::Print => write!(f, "print"),
             Token::Identifier(w) => write!(f, "{w}"),
             Token::Integer(i) => write!(f, "{i}"),
             Token::Whitespace => write!(f, "<Whitespace>"),
