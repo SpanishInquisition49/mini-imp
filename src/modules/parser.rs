@@ -1,7 +1,7 @@
 use chumsky::{input::ValueInput, prelude::*};
 
 use crate::modules::{
-    ast::{BoolExpr, Cmd, Expr, Program},
+    ast::{BoolExpr, Cmd, Expr, Factor, Program, Term},
     lexer::Token,
 };
 
@@ -10,54 +10,59 @@ where
     I: ValueInput<'a, Token = Token, Span = SimpleSpan>,
 {
     let var = select! { Token::Identifier(s) => s };
-
     let int_lit = select! { Token::Integer(n) => n };
 
     let expr = recursive(|expr| {
-        let atom = choice((
-            var.map(Expr::Var),
-            int_lit.map(Expr::Int),
+        let factor = choice((
+            var.clone().map(Factor::Var),
+            int_lit.map(Factor::Int),
             expr.clone()
-                .delimited_by(just(Token::LParen), just(Token::RParen)),
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|e| Factor::SubExp(Box::new(e))),
         ));
 
-        let product = atom
-            .clone()
-            .foldl(just(Token::Star).ignore_then(atom).repeated(), |l, r| {
-                Expr::Mul(Box::new(l), Box::new(r))
-            });
+        let term = factor.clone().map(|f| Term::Fac(Box::new(f))).foldl(
+            just(Token::Star).ignore_then(factor.clone()).repeated(),
+            |t, f| Term::Mul(Box::new(t), Box::new(f)),
+        );
 
-        product.clone().foldl(
-            just(Token::Plus)
-                .to(true)
-                .or(just(Token::Minus).to(false))
-                .then(product)
-                .repeated(),
-            |l, (add, r)| {
-                if add {
-                    Expr::Add(Box::new(l), Box::new(r))
+        term.clone().map(|t| Expr::Term(Box::new(t))).foldl(
+            choice((
+                just(Token::Plus)
+                    .ignore_then(term.clone())
+                    .map(|t| (true, t)),
+                just(Token::Minus)
+                    .ignore_then(term.clone())
+                    .map(|t| (false, t)),
+            ))
+            .repeated(),
+            |e, (is_add, t)| {
+                if is_add {
+                    Expr::Add(Box::new(e), Box::new(t))
                 } else {
-                    Expr::Sub(Box::new(l), Box::new(r))
+                    Expr::Sub(Box::new(e), Box::new(t))
                 }
             },
         )
     });
 
     let bool_expr = {
-        let e = expr.clone();
-        choice((
+        let atom = choice((
             just(Token::True).to(BoolExpr::True),
             just(Token::False).to(BoolExpr::False),
-            e.clone()
+        ));
+        let e = expr.clone();
+        choice((
+            atom.clone()
                 .then_ignore(just(Token::And))
-                .then(e.clone())
+                .then(atom.clone())
                 .map(|(l, r)| BoolExpr::And(Box::new(l), Box::new(r))),
-            e.clone()
+            atom.clone()
                 .then_ignore(just(Token::Or))
-                .then(e.clone())
+                .then(atom.clone())
                 .map(|(l, r)| BoolExpr::Or(Box::new(l), Box::new(r))),
             just(Token::Not)
-                .ignore_then(e.clone())
+                .ignore_then(atom.clone())
                 .map(|x| BoolExpr::Not(Box::new(x))),
             e.clone()
                 .then_ignore(just(Token::LowerThan))

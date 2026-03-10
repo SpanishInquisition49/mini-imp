@@ -8,13 +8,17 @@ compilation technique course.
 ```
 <prog> ::= def main with input <var> output <var> as <cmd>
 
-<cmd> ::= (<cmd>) | <var> := <e> | <cmd> ; <cmd>
-  | if <b> then <cmd> else <cmd> | while <b> do <cmd> | print <e>
+<cmd> ::= (<cmd>) | skip | <var> := <exp> | <cmd> ; <cmd>
+  | if <b> then <cmd> else <cmd> | while <b> do <cmd> | print <exp>
 
-<e> ::= <var> | <int> | <e> + <e> | <e> - <e> | <e> * <e>
+<exp> ::=  <exp> + <term> | <exp> - <term> | <term>
 
-<b> ::= true | false | <e> and <e> | <e> or <e> | not <e> |
-  | <e> < <e> | <e> > <e>
+<term> ::= <term> * <factor> | <factor>
+
+<factor> ::= <var> | <int> | (<exp>)
+
+<b> ::= true | false | <b> and <b> | <b> or <b> | not <b> |
+  | <exp> < <exp> | <exp> > <exp>
 
 <var> Is the set of letters and numbers starting with a letter.
 <int> are integers numbers

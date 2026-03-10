@@ -81,24 +81,52 @@ impl Cmd {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Var(String),
-    Int(i64),
-    Add(Box<Expr>, Box<Expr>),
-    Sub(Box<Expr>, Box<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
+    Add(Box<Expr>, Box<Term>),
+    Sub(Box<Expr>, Box<Term>),
+    Term(Box<Term>),
 }
 
 impl Expr {
     pub fn eval(&self, env: &Env) -> Result<i64, EvalError> {
         match self {
-            Expr::Var(v) => env
+            Expr::Add(l, r) => Ok(l.eval(env)? + r.eval(env)?),
+            Expr::Sub(l, r) => Ok(l.eval(env)? - r.eval(env)?),
+            Expr::Term(term) => Ok(term.eval(env)?),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Term {
+    Mul(Box<Term>, Box<Factor>),
+    Fac(Box<Factor>),
+}
+
+impl Term {
+    pub fn eval(&self, env: &Env) -> Result<i64, EvalError> {
+        match self {
+            Term::Mul(l, r) => Ok(l.eval(env)? * r.eval(env)?),
+            Term::Fac(factor) => Ok(factor.eval(env)?),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Factor {
+    Var(String),
+    Int(i64),
+    SubExp(Box<Expr>),
+}
+
+impl Factor {
+    pub fn eval(&self, env: &Env) -> Result<i64, EvalError> {
+        match self {
+            Factor::Var(v) => env
                 .get(v)
                 .copied()
                 .ok_or_else(|| EvalError::UnboundVariable(v.clone())),
-            Expr::Int(i) => Ok(*i),
-            Expr::Add(l, r) => Ok(l.eval(env)? + r.eval(env)?),
-            Expr::Sub(l, r) => Ok(l.eval(env)? - r.eval(env)?),
-            Expr::Mul(l, r) => Ok(l.eval(env)? * r.eval(env)?),
+            Factor::Int(i) => Ok(*i),
+            Factor::SubExp(expr) => Ok(expr.eval(env)?),
         }
     }
 }
@@ -107,23 +135,21 @@ impl Expr {
 pub enum BoolExpr {
     True,
     False,
-    And(Box<Expr>, Box<Expr>),
-    Or(Box<Expr>, Box<Expr>),
-    Not(Box<Expr>),
+    And(Box<BoolExpr>, Box<BoolExpr>),
+    Or(Box<BoolExpr>, Box<BoolExpr>),
+    Not(Box<BoolExpr>),
     LowerThan(Box<Expr>, Box<Expr>),
     GreaterThan(Box<Expr>, Box<Expr>),
 }
 
 impl BoolExpr {
-    // NOTE: we do type coercion here, this should be removed in the next version, and
-    // adjust the syntax accordingly
     pub fn eval(&self, env: &Env) -> Result<bool, EvalError> {
         match self {
             BoolExpr::True => Ok(true),
             BoolExpr::False => Ok(false),
-            BoolExpr::And(l, r) => Ok(l.eval(env)? != 0 && r.eval(env)? != 0),
-            BoolExpr::Or(l, r) => Ok(l.eval(env)? != 0 || r.eval(env)? != 0),
-            BoolExpr::Not(e) => Ok(e.eval(env)? == 0),
+            BoolExpr::And(l, r) => Ok(l.eval(env)? && r.eval(env)?),
+            BoolExpr::Or(l, r) => Ok(l.eval(env)? || r.eval(env)?),
+            BoolExpr::Not(e) => Ok(!e.eval(env)?),
             BoolExpr::LowerThan(l, r) => Ok(l.eval(env)? < r.eval(env)?),
             BoolExpr::GreaterThan(l, r) => Ok(l.eval(env)? > r.eval(env)?),
         }
