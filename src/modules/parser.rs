@@ -14,7 +14,7 @@ where
 
     let expr = recursive(|expr| {
         let factor = choice((
-            var.clone().map(Factor::Var),
+            var.map(Factor::Var),
             int_lit.map(Factor::Int),
             expr.clone()
                 .delimited_by(just(Token::LParen), just(Token::RParen))
@@ -53,6 +53,7 @@ where
         ));
         let e = expr.clone();
         choice((
+            atom.clone(),
             atom.clone()
                 .then_ignore(just(Token::And))
                 .then(atom.clone())
@@ -82,7 +83,6 @@ where
             .map(|c| Cmd::Block(Box::new(c)));
 
         let assign = var
-            .clone()
             .then_ignore(just(Token::Assign))
             .then(expr.clone())
             .map(|(v, e)| Cmd::Assign(v, Box::new(e)));
@@ -105,7 +105,9 @@ where
             .ignore_then(expr.clone())
             .map(|e| Cmd::Print(Box::new(e)));
 
-        choice((block, if_cmd, while_cmd, assign, print_cmd))
+        let skip_cmd = just(Token::Skip).to(Cmd::Skip);
+
+        choice((block, if_cmd, while_cmd, assign, print_cmd, skip_cmd))
             .then(just(Token::SemiColon).ignore_then(cmd.clone()).or_not())
             .map(|(c, rest)| match rest {
                 Some(r) => Cmd::Seq(Box::new(c), Box::new(r)),
@@ -117,7 +119,7 @@ where
         .ignore_then(just(Token::Main))
         .ignore_then(just(Token::With))
         .ignore_then(just(Token::Input))
-        .ignore_then(var.clone())
+        .ignore_then(var)
         .then_ignore(just(Token::Output))
         .then(var)
         .then_ignore(just(Token::As))

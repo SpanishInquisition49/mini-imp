@@ -42,6 +42,7 @@ pub enum Cmd {
     Ite(Box<BoolExpr>, Box<Cmd>, Box<Cmd>),
     While(Box<BoolExpr>, Box<Cmd>),
     Print(Box<Expr>),
+    Skip,
 }
 
 impl Cmd {
@@ -64,7 +65,6 @@ impl Cmd {
                     r#else.eval(env)
                 }
             }
-            // NOTE: we do not add a max iterations, we could loop forever
             Cmd::While(guard, body) => {
                 while guard.eval(env)? {
                     body.eval(env)?
@@ -75,6 +75,7 @@ impl Cmd {
                 println!("{}", expr.eval(env)?);
                 Ok(())
             }
+            Cmd::Skip => Ok(()),
         }
     }
 }

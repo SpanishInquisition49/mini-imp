@@ -56,6 +56,8 @@ pub enum Token {
     As,
     #[token("print")]
     Print,
+    #[token("skip")]
+    Skip,
     #[regex(r"[a-zA-Z][a-zA-Z0-9]*", |lex| lex.slice().to_string())]
     Identifier(String),
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
@@ -94,6 +96,7 @@ impl fmt::Display for Token {
             Token::Output => write!(f, "output"),
             Token::As => write!(f, "as"),
             Token::Print => write!(f, "print"),
+            Token::Skip => write!(f, "skip"),
             Token::Identifier(w) => write!(f, "{w}"),
             Token::Integer(i) => write!(f, "{i}"),
             Token::Whitespace => write!(f, "<Whitespace>"),

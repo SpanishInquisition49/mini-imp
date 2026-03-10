@@ -1,0 +1,4 @@
+def main with input in output out as
+while true do (
+  skip
+)

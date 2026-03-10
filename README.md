@@ -10,6 +10,7 @@ compilation technique course.
 
 <cmd> ::= (<cmd>) | skip | <var> := <exp> | <cmd> ; <cmd>
   | if <b> then <cmd> else <cmd> | while <b> do <cmd> | print <exp>
+  | skip
 
 <exp> ::=  <exp> + <term> | <exp> - <term> | <term>
 
