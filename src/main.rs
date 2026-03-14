@@ -1,4 +1,9 @@
-use std::{env, fs};
+use std::{
+    env,
+    fs::{self},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::{
@@ -8,8 +13,9 @@ use chumsky::{
 };
 use logos::Logos;
 
-use crate::modules::{lexer::Token, parser::parser};
+use crate::modules::{control_flow_graph::ControlFlowGraph, lexer::Token, parser::parser};
 
+mod ast;
 mod modules;
 
 fn main() {
@@ -20,12 +26,12 @@ fn main() {
         std::process::exit(1);
     }
 
-    let path = args[1].clone();
+    let mut path = PathBuf::from_str(&args[1].clone()).unwrap();
 
     let program = match fs::exists(&path) {
         Ok(true) => fs::read_to_string(&path).unwrap(),
         _ => {
-            println!("File '{}' not found.", &path);
+            println!("File '{}' not found.", &path.to_string_lossy());
             std::process::exit(1);
         }
     };
@@ -43,10 +49,18 @@ fn main() {
         Stream::from_iter(token_iterator).map((0..program.len()).into(), |(t, s): (_, _)| (t, s));
 
     match parser().parse(token_stream).into_result() {
-        Ok(p) => match p.eval(input) {
-            Ok(out) => println!("{out}"),
-            Err(err) => println!("Runtime Error: {err}"),
-        },
+        Ok(p) => {
+            let cfg = ControlFlowGraph::from(&p);
+            path.set_extension("dot");
+            match fs::write(&path, cfg.to_dot()) {
+                Ok(_) => println!("Saved CFG to {}", path.to_string_lossy()),
+                Err(e) => println!("Failed to save CFG to {}: {e}", path.to_string_lossy()),
+            }
+            match p.eval(input) {
+                Ok(out) => println!("{out}"),
+                Err(err) => println!("Runtime Error: {err}"),
+            }
+        }
         Err(errors) => {
             for err in errors {
                 Report::build(ReportKind::Error, ((), err.span().into_range()))

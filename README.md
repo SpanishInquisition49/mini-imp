@@ -37,4 +37,6 @@ mini-imp <program> <input>
 
 ```
 
-Some simple programs are in the `./examples/` directory
+This also create a dot file describing the Control Flow Graph of the code.
+
+Some simple programs are in the `./examples/` directory.

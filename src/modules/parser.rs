@@ -1,8 +1,12 @@
 use chumsky::{input::ValueInput, prelude::*};
 
-use crate::modules::{
-    ast::{Atom, BoolExpr, Cmd, Expr, Factor, Program, Term},
-    lexer::Token,
+use crate::{
+    ast::{
+        boolean_exp::{Atom, BoolExpr},
+        cmd::Cmd,
+        expr::{Expr, Factor, Term},
+    },
+    modules::{lexer::Token, program::Program},
 };
 
 pub fn parser<'a, I>() -> impl Parser<'a, I, Program, extra::Err<Rich<'a, Token>>>
