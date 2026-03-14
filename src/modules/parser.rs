@@ -1,7 +1,7 @@
 use chumsky::{input::ValueInput, prelude::*};
 
 use crate::modules::{
-    ast::{BoolExpr, Cmd, Expr, Factor, Program, Term},
+    ast::{Atom, BoolExpr, Cmd, Expr, Factor, Program, Term},
     lexer::Token,
 };
 
@@ -46,35 +46,49 @@ where
         )
     });
 
-    let bool_expr = {
+    let bexp = recursive(|bexp| {
         let atom = choice((
-            just(Token::True).to(BoolExpr::True),
-            just(Token::False).to(BoolExpr::False),
+            just(Token::True).to(Atom::True),
+            just(Token::False).to(Atom::False),
+            bexp.clone()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|b| Atom::SubBexp(Box::new(b))),
         ));
-        let e = expr.clone();
-        choice((
-            atom.clone(),
-            atom.clone()
-                .then_ignore(just(Token::And))
-                .then(atom.clone())
-                .map(|(l, r)| BoolExpr::And(Box::new(l), Box::new(r))),
-            atom.clone()
-                .then_ignore(just(Token::Or))
-                .then(atom.clone())
-                .map(|(l, r)| BoolExpr::Or(Box::new(l), Box::new(r))),
+
+        let base = choice((
             just(Token::Not)
-                .ignore_then(atom.clone())
-                .map(|x| BoolExpr::Not(Box::new(x))),
-            e.clone()
+                .ignore_then(bexp.clone())
+                .map(|b| BoolExpr::Not(Box::new(b))),
+            expr.clone()
                 .then_ignore(just(Token::LowerThan))
-                .then(e.clone())
+                .then(expr.clone())
                 .map(|(l, r)| BoolExpr::LowerThan(Box::new(l), Box::new(r))),
-            e.clone()
+            expr.clone()
                 .then_ignore(just(Token::GreaterThan))
-                .then(e.clone())
+                .then(expr.clone())
                 .map(|(l, r)| BoolExpr::GreaterThan(Box::new(l), Box::new(r))),
-        ))
-    };
+            atom.clone().map(|a| BoolExpr::Atom(Box::new(a))),
+        ));
+
+        base.foldl(
+            choice((
+                just(Token::And)
+                    .ignore_then(atom.clone())
+                    .map(|a| (true, a)),
+                just(Token::Or)
+                    .ignore_then(atom.clone())
+                    .map(|a| (false, a)),
+            ))
+            .repeated(),
+            |l, (is_and, r)| {
+                if is_and {
+                    BoolExpr::And(Box::new(l), Box::new(r))
+                } else {
+                    BoolExpr::Or(Box::new(l), Box::new(r))
+                }
+            },
+        )
+    });
 
     let cmd = recursive(|cmd| {
         let block = cmd
@@ -88,7 +102,7 @@ where
             .map(|(v, e)| Cmd::Assign(v, Box::new(e)));
 
         let if_cmd = just(Token::If)
-            .ignore_then(bool_expr.clone())
+            .ignore_then(bexp.clone())
             .then_ignore(just(Token::Then))
             .then(cmd.clone())
             .then_ignore(just(Token::Else))
@@ -96,7 +110,7 @@ where
             .map(|((b, t), e)| Cmd::Ite(Box::new(b), Box::new(t), Box::new(e)));
 
         let while_cmd = just(Token::While)
-            .ignore_then(bool_expr.clone())
+            .ignore_then(bexp.clone())
             .then_ignore(just(Token::Do))
             .then(cmd.clone())
             .map(|(b, c)| Cmd::While(Box::new(b), Box::new(c)));

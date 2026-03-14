@@ -10,7 +10,6 @@ compilation technique course.
 
 <cmd> ::= (<cmd>) | skip | <var> := <exp> | <cmd> ; <cmd>
   | if <b> then <cmd> else <cmd> | while <b> do <cmd> | print <exp>
-  | skip
 
 <exp> ::=  <exp> + <term> | <exp> - <term> | <term>
 
@@ -18,8 +17,10 @@ compilation technique course.
 
 <factor> ::= <var> | <int> | (<exp>)
 
-<b> ::= true | false | <b> and <b> | <b> or <b> | not <b> |
-  | <exp> < <exp> | <exp> > <exp>
+<bexp> ::= <bexp> and <atom> | <bexp> or <atom> | not <bexp>
+  | <exp> < <exp> | <exp> > <exp> | <atom>
+
+<atom> ::= true | false | (<bexp>)
 
 <var> Is the set of letters and numbers starting with a letter.
 <int> are integers numbers

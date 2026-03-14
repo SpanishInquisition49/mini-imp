@@ -134,25 +134,40 @@ impl Factor {
 
 #[derive(Debug, Clone)]
 pub enum BoolExpr {
-    True,
-    False,
-    And(Box<BoolExpr>, Box<BoolExpr>),
-    Or(Box<BoolExpr>, Box<BoolExpr>),
+    And(Box<BoolExpr>, Box<Atom>),
+    Or(Box<BoolExpr>, Box<Atom>),
     Not(Box<BoolExpr>),
     LowerThan(Box<Expr>, Box<Expr>),
     GreaterThan(Box<Expr>, Box<Expr>),
+    Atom(Box<Atom>),
 }
 
 impl BoolExpr {
     pub fn eval(&self, env: &Env) -> Result<bool, EvalError> {
         match self {
-            BoolExpr::True => Ok(true),
-            BoolExpr::False => Ok(false),
             BoolExpr::And(l, r) => Ok(l.eval(env)? && r.eval(env)?),
             BoolExpr::Or(l, r) => Ok(l.eval(env)? || r.eval(env)?),
             BoolExpr::Not(e) => Ok(!e.eval(env)?),
             BoolExpr::LowerThan(l, r) => Ok(l.eval(env)? < r.eval(env)?),
             BoolExpr::GreaterThan(l, r) => Ok(l.eval(env)? > r.eval(env)?),
+            BoolExpr::Atom(atom) => Ok(atom.eval(env)?),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Atom {
+    True,
+    False,
+    SubBexp(Box<BoolExpr>),
+}
+
+impl Atom {
+    pub fn eval(&self, env: &Env) -> Result<bool, EvalError> {
+        match self {
+            Atom::True => Ok(true),
+            Atom::False => Ok(false),
+            Atom::SubBexp(bexp) => Ok(bexp.eval(env)?),
         }
     }
 }
