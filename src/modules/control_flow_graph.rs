@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use chumsky::container::Container;
+
 use crate::{
     ast::{
         boolean_exp::BoolExpr,
@@ -29,6 +31,18 @@ pub enum Edge {
 pub struct Node {
     pub code: Code,
     pub next: Edge,
+}
+
+impl Node {
+    pub fn is_removable(&self) -> bool {
+        match (&self.code, &self.next) {
+            (Code::Skip, Edge::Bottom) => false,
+            (Code::Skip, Edge::Next(_)) => true,
+            // NOTE: this case should be impossible
+            (Code::Skip, Edge::Branch(_, _)) => false,
+            (_, _) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +87,6 @@ impl ControlFlowGraph {
 
     fn sub_build(&mut self, cmd: &AtomCmd) -> (NodeId, NodeId) {
         match cmd {
-            // BUG: blocks can create problem with loop and conditional branch
             AtomCmd::Block(cmd) => self.build(cmd),
             AtomCmd::Assign(var, expr) => {
                 let id = self.add_node(Code::Assign(var.clone(), expr.clone()), Edge::Bottom);
@@ -125,6 +138,43 @@ impl ControlFlowGraph {
         }
     }
 
+    /// Remove all the superfluous skip from the CFG
+    /// preserving the CFG definition
+    pub fn minimise(&mut self) {
+        // NOTE:
+        // Helper function used to get the real successor of a node
+        let successor = |nodes: &HashMap<NodeId, Node>, mut id: NodeId| {
+            while let Some(node) = nodes.get(&id) {
+                if node.is_removable() {
+                    if let Edge::Next(next) = node.next {
+                        id = next;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            id
+        };
+
+        let ids: Vec<NodeId> = self.nodes.keys().copied().collect();
+        for id in ids {
+            let next_new = match self.nodes[&id].next.clone() {
+                Edge::Bottom => Edge::Bottom,
+                Edge::Next(succ) => Edge::Next(successor(&self.nodes, succ)),
+                Edge::Branch(t, f) => {
+                    Edge::Branch(successor(&self.nodes, t), successor(&self.nodes, f))
+                }
+            };
+            self.nodes.get_mut(&id).unwrap().next = next_new;
+        }
+
+        // sweep all the removable nodes
+        self.nodes
+            .retain(|id, node| !node.is_removable() || *id == self.entry || *id == self.r#final);
+    }
+
     pub fn to_dot(&self) -> String {
         let mut out = String::new();
 
@@ -169,6 +219,7 @@ impl From<&Program> for ControlFlowGraph {
     fn from(value: &Program) -> Self {
         let mut cfg = ControlFlowGraph::new();
         let (entry, r#final) = cfg.build(&value.body);
+        cfg.minimise();
         cfg.entry = entry;
         cfg.r#final = r#final;
         cfg
