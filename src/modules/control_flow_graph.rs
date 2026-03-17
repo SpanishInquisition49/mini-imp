@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{boolean_exp::BoolExpr, cmd::Cmd, expr::Expr},
+    ast::{
+        boolean_exp::BoolExpr,
+        cmd::{AtomCmd, Cmd},
+        expr::Expr,
+    },
     modules::program::Program,
 };
 
@@ -55,23 +59,29 @@ impl ControlFlowGraph {
 
     /// Build the Sub-CFG graph for the given Cmd
     /// returning a pair (entry, exit) node ids of the Sub-CFG.
-    fn build(&mut self, cmd: Box<Cmd>) -> (NodeId, NodeId) {
-        match *cmd {
-            Cmd::Block(cmd) => self.build(cmd),
-            Cmd::Assign(var, expr) => {
-                let id = self.add_node(Code::Assign(var.clone(), expr.clone()), Edge::Bottom);
-                (id, id)
-            }
-            Cmd::Seq(cmd1, cmd2) => {
-                let (e_cmd1, f_cmd1) = self.build(cmd1);
-                let (e_cmd2, f_cmd2) = self.build(cmd2);
-                // Link the first command to the second command
+    fn build(&mut self, cmd: &Cmd) -> (NodeId, NodeId) {
+        match cmd {
+            Cmd::Seq(atom_cmd, cmd) => {
+                let (e_cmd1, f_cmd1) = self.sub_build(atom_cmd);
+                let (e_cmd2, f_cmd2) = self.build(cmd);
                 self.nodes.get_mut(&f_cmd1).unwrap().next = Edge::Next(e_cmd2);
                 (e_cmd1, f_cmd2)
             }
-            Cmd::Ite(guard, true_branch, false_branch) => {
-                let (e_true, f_true) = self.build(true_branch);
-                let (e_false, f_false) = self.build(false_branch);
+            Cmd::AtomCmd(atom_cmd) => self.sub_build(atom_cmd),
+        }
+    }
+
+    fn sub_build(&mut self, cmd: &AtomCmd) -> (NodeId, NodeId) {
+        match cmd {
+            // BUG: blocks can create problem with loop and conditional branch
+            AtomCmd::Block(cmd) => self.build(cmd),
+            AtomCmd::Assign(var, expr) => {
+                let id = self.add_node(Code::Assign(var.clone(), expr.clone()), Edge::Bottom);
+                (id, id)
+            }
+            AtomCmd::Ite(guard, true_branch, false_branch) => {
+                let (e_true, f_true) = self.sub_build(true_branch);
+                let (e_false, f_false) = self.sub_build(false_branch);
 
                 let join = self.add_node(Code::Skip, Edge::Bottom);
 
@@ -83,8 +93,8 @@ impl ControlFlowGraph {
 
                 (guard_id, join)
             }
-            Cmd::While(guard, body) => {
-                let (e_body, f_body) = self.build(body);
+            AtomCmd::While(guard, body) => {
+                let (e_body, f_body) = self.sub_build(body);
                 let join = self.add_node(Code::Skip, Edge::Bottom);
                 let guard_id =
                     self.add_node(Code::Guard(guard.clone()), Edge::Branch(e_body, join));
@@ -93,11 +103,11 @@ impl ControlFlowGraph {
                 self.nodes.get_mut(&f_body).unwrap().next = Edge::Next(guard_id);
                 (guard_id, join)
             }
-            Cmd::Skip => {
+            AtomCmd::Skip => {
                 let id = self.add_node(Code::Skip, Edge::Bottom);
                 (id, id)
             }
-            Cmd::Print(_) => {
+            AtomCmd::Print(_) => {
                 // NOTE:
                 // The print command is just for debugging
                 // and is ignored in the CFG (we add a skip, could be removed later)
@@ -158,7 +168,7 @@ impl ControlFlowGraph {
 impl From<&Program> for ControlFlowGraph {
     fn from(value: &Program) -> Self {
         let mut cfg = ControlFlowGraph::new();
-        let (entry, r#final) = cfg.build(value.body.clone());
+        let (entry, r#final) = cfg.build(&value.body);
         cfg.entry = entry;
         cfg.r#final = r#final;
         cfg

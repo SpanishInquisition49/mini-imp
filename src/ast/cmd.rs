@@ -5,46 +5,59 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Cmd {
-    Block(Box<Cmd>),
-    Assign(String, Box<Expr>),
-    Seq(Box<Cmd>, Box<Cmd>),
-    Ite(Box<BoolExpr>, Box<Cmd>, Box<Cmd>),
-    While(Box<BoolExpr>, Box<Cmd>),
-    Print(Box<Expr>),
-    Skip,
+    Seq(Box<AtomCmd>, Box<Cmd>),
+    AtomCmd(Box<AtomCmd>),
 }
 
 impl Cmd {
     pub fn eval(&self, env: &mut Env) -> Result<(), EvalError> {
         match self {
-            Cmd::Block(cmd) => cmd.eval(env),
-            Cmd::Assign(v, expr) => {
-                let val = expr.eval(env)?;
-                env.insert(v.clone(), val);
-                Ok(())
-            }
             Cmd::Seq(c1, c2) => {
                 c1.eval(env)?;
                 c2.eval(env)
             }
-            Cmd::Ite(guard, then, r#else) => {
+            Cmd::AtomCmd(cmd) => Ok(cmd.eval(env)?),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AtomCmd {
+    Block(Box<Cmd>),
+    Assign(String, Box<Expr>),
+    Ite(Box<BoolExpr>, Box<AtomCmd>, Box<AtomCmd>),
+    While(Box<BoolExpr>, Box<AtomCmd>),
+    Print(Box<Expr>),
+    Skip,
+}
+
+impl AtomCmd {
+    pub fn eval(&self, env: &mut Env) -> Result<(), EvalError> {
+        match self {
+            AtomCmd::Assign(v, expr) => {
+                let val = expr.eval(env)?;
+                env.insert(v.clone(), val);
+                Ok(())
+            }
+            AtomCmd::Ite(guard, then, r#else) => {
                 if guard.eval(env)? {
                     then.eval(env)
                 } else {
                     r#else.eval(env)
                 }
             }
-            Cmd::While(guard, body) => {
+            AtomCmd::While(guard, body) => {
                 while guard.eval(env)? {
                     body.eval(env)?
                 }
                 Ok(())
             }
-            Cmd::Print(expr) => {
+            AtomCmd::Print(expr) => {
                 println!("{}", expr.eval(env)?);
                 Ok(())
             }
-            Cmd::Skip => Ok(()),
+            AtomCmd::Skip => Ok(()),
+            AtomCmd::Block(cmd) => Ok(cmd.eval(env)?),
         }
     }
 }

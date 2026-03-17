@@ -8,8 +8,10 @@ compilation technique course.
 ```
 <prog> ::= def main with input <var> output <var> as <cmd>
 
-<cmd> ::= (<cmd>) | skip | <var> := <exp> | <cmd> ; <cmd>
-  | if <b> then <cmd> else <cmd> | while <b> do <cmd> | print <exp>
+<cmd> ::= <atom_cmd> ; <cmd> | <atom_cmd>
+
+<atom_cmd> ::= (<cmd>) | skip | <var> := <exp>
+  | if <b> then <atom_cmd> else <atom_cmd> | while <b> do <atom_cmd> | print <exp>
 
 <exp> ::=  <exp> + <term> | <exp> - <term> | <term>
 

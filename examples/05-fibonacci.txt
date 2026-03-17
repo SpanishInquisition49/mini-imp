@@ -1,0 +1,18 @@
+def main with input n output result as
+result := 0;
+if n < 1 then
+    skip
+else
+    if n > 1 then (
+        result := 1;
+        prev := 0;
+        i := 2;
+        while i < n + 1 do (
+            temp := result + prev;
+            prev := result;
+            result := temp;
+            i := i + 1
+        )
+    )
+    else
+        result := 1

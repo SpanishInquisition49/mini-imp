@@ -3,7 +3,7 @@ use chumsky::{input::ValueInput, prelude::*};
 use crate::{
     ast::{
         boolean_exp::{Atom, BoolExpr},
-        cmd::Cmd,
+        cmd::{AtomCmd, Cmd},
         expr::{Expr, Factor, Term},
     },
     modules::{lexer::Token, program::Program},
@@ -95,41 +95,45 @@ where
     });
 
     let cmd = recursive(|cmd| {
-        let block = cmd
-            .clone()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|c| Cmd::Block(Box::new(c)));
+        let atom = recursive(|atom| {
+            let block = cmd
+                .clone()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|c| AtomCmd::Block(Box::new(c)));
 
-        let assign = var
-            .then_ignore(just(Token::Assign))
-            .then(expr.clone())
-            .map(|(v, e)| Cmd::Assign(v, Box::new(e)));
+            let assign = var
+                .clone()
+                .then_ignore(just(Token::Assign))
+                .then(expr.clone())
+                .map(|(v, e)| AtomCmd::Assign(v, Box::new(e)));
 
-        let if_cmd = just(Token::If)
-            .ignore_then(bexp.clone())
-            .then_ignore(just(Token::Then))
-            .then(cmd.clone())
-            .then_ignore(just(Token::Else))
-            .then(cmd.clone())
-            .map(|((b, t), e)| Cmd::Ite(Box::new(b), Box::new(t), Box::new(e)));
+            let if_cmd = just(Token::If)
+                .ignore_then(bexp.clone())
+                .then_ignore(just(Token::Then))
+                .then(atom.clone())
+                .then_ignore(just(Token::Else))
+                .then(atom.clone())
+                .map(|((b, t), e)| AtomCmd::Ite(Box::new(b), Box::new(t), Box::new(e)));
 
-        let while_cmd = just(Token::While)
-            .ignore_then(bexp.clone())
-            .then_ignore(just(Token::Do))
-            .then(cmd.clone())
-            .map(|(b, c)| Cmd::While(Box::new(b), Box::new(c)));
+            let while_cmd = just(Token::While)
+                .ignore_then(bexp.clone())
+                .then_ignore(just(Token::Do))
+                .then(atom) // ← consuma atom, non clone
+                .map(|(b, c)| AtomCmd::While(Box::new(b), Box::new(c)));
 
-        let print_cmd = just(Token::Print)
-            .ignore_then(expr.clone())
-            .map(|e| Cmd::Print(Box::new(e)));
+            let print_cmd = just(Token::Print)
+                .ignore_then(expr.clone())
+                .map(|e| AtomCmd::Print(Box::new(e)));
 
-        let skip_cmd = just(Token::Skip).to(Cmd::Skip);
+            let skip_cmd = just(Token::Skip).to(AtomCmd::Skip);
 
-        choice((block, if_cmd, while_cmd, assign, print_cmd, skip_cmd))
-            .then(just(Token::SemiColon).ignore_then(cmd.clone()).or_not())
+            choice((block, if_cmd, while_cmd, assign, print_cmd, skip_cmd))
+        });
+
+        atom.then(just(Token::SemiColon).ignore_then(cmd.clone()).or_not())
             .map(|(c, rest)| match rest {
                 Some(r) => Cmd::Seq(Box::new(c), Box::new(r)),
-                None => c,
+                None => Cmd::AtomCmd(Box::new(c)),
             })
     });
 
