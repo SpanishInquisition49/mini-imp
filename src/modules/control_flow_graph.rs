@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use chumsky::container::Container;
-
 use crate::{
     ast::{
         boolean_exp::BoolExpr,
@@ -103,18 +101,22 @@ impl ControlFlowGraph {
 
                 let guard_id =
                     self.add_node(Code::Guard(guard.clone()), Edge::Branch(e_true, e_false));
+                // We add a skip to preserve the CFG properties
+                let start = self.add_node(Code::Skip, Edge::Next(guard_id));
 
-                (guard_id, join)
+                (start, join)
             }
             AtomCmd::While(guard, body) => {
                 let (e_body, f_body) = self.sub_build(body);
                 let join = self.add_node(Code::Skip, Edge::Bottom);
                 let guard_id =
                     self.add_node(Code::Guard(guard.clone()), Edge::Branch(e_body, join));
+                // We add a skip to preserve the CFG properties
+                let start = self.add_node(Code::Skip, Edge::Next(guard_id));
 
                 // we replace the Bottom with the start of the loop in the body CFG
                 self.nodes.get_mut(&f_body).unwrap().next = Edge::Next(guard_id);
-                (guard_id, join)
+                (start, join)
             }
             AtomCmd::Skip => {
                 let id = self.add_node(Code::Skip, Edge::Bottom);
@@ -219,9 +221,9 @@ impl From<&Program> for ControlFlowGraph {
     fn from(value: &Program) -> Self {
         let mut cfg = ControlFlowGraph::new();
         let (entry, r#final) = cfg.build(&value.body);
-        cfg.minimise();
         cfg.entry = entry;
         cfg.r#final = r#final;
+        cfg.minimise();
         cfg
     }
 }
