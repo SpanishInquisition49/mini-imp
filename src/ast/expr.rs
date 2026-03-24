@@ -1,8 +1,9 @@
 use core::fmt;
+use std::collections::HashSet;
 
 use crate::modules::eval::{Env, EvalError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Expr {
     Add(Box<Expr>, Box<Term>),
     Sub(Box<Expr>, Box<Term>),
@@ -17,6 +18,24 @@ impl Expr {
             Expr::Term(term) => Ok(term.eval(env)?),
         }
     }
+
+    pub fn vars(&self) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        match self {
+            Expr::Add(expr, term) => {
+                vars.extend(expr.vars());
+                vars.extend(term.vars());
+            }
+            Expr::Sub(expr, term) => {
+                vars.extend(expr.vars());
+                vars.extend(term.vars());
+            }
+            Expr::Term(term) => {
+                vars.extend(term.vars());
+            }
+        };
+        vars
+    }
 }
 
 impl fmt::Display for Expr {
@@ -29,7 +48,7 @@ impl fmt::Display for Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Term {
     Mul(Box<Term>, Box<Factor>),
     Fac(Box<Factor>),
@@ -40,6 +59,21 @@ impl Term {
         match self {
             Term::Mul(l, r) => Ok(l.eval(env)? * r.eval(env)?),
             Term::Fac(factor) => Ok(factor.eval(env)?),
+        }
+    }
+
+    pub fn vars(&self) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        match self {
+            Term::Mul(term, factor) => {
+                vars.extend(term.vars());
+                vars.extend(factor.vars());
+                vars
+            }
+            Term::Fac(factor) => {
+                vars.extend(factor.vars());
+                vars
+            }
         }
     }
 }
@@ -53,7 +87,7 @@ impl fmt::Display for Term {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Factor {
     Var(String),
     Int(i64),
@@ -69,6 +103,18 @@ impl Factor {
                 .ok_or_else(|| EvalError::UnboundVariable(v.clone())),
             Factor::Int(i) => Ok(*i),
             Factor::SubExp(expr) => Ok(expr.eval(env)?),
+        }
+    }
+
+    pub fn vars(&self) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        match self {
+            Factor::Var(v) => {
+                vars.insert(v.clone());
+                vars
+            }
+            Factor::Int(_) => vars,
+            Factor::SubExp(expr) => expr.vars(),
         }
     }
 }

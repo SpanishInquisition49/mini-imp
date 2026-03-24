@@ -1,4 +1,5 @@
 use core::fmt;
+use std::collections::HashSet;
 
 use crate::{
     ast::expr::Expr,
@@ -25,6 +26,35 @@ impl BoolExpr {
             BoolExpr::GreaterThan(l, r) => Ok(l.eval(env)? > r.eval(env)?),
             BoolExpr::Atom(atom) => Ok(atom.eval(env)?),
         }
+    }
+
+    pub fn vars(&self) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        match self {
+            BoolExpr::And(bool_expr, atom) => {
+                vars.extend(bool_expr.vars());
+                vars.extend(atom.vars());
+            }
+            BoolExpr::Or(bool_expr, atom) => {
+                vars.extend(bool_expr.vars());
+                vars.extend(atom.vars());
+            }
+            BoolExpr::Not(bool_expr) => {
+                vars.extend(bool_expr.vars());
+            }
+            BoolExpr::LowerThan(expr, expr1) => {
+                vars.extend(expr.vars());
+                vars.extend(expr1.vars());
+            }
+            BoolExpr::GreaterThan(expr, expr1) => {
+                vars.extend(expr.vars());
+                vars.extend(expr1.vars());
+            }
+            BoolExpr::Atom(atom) => {
+                vars.extend(atom.vars());
+            }
+        };
+        vars
     }
 }
 
@@ -54,6 +84,15 @@ impl Atom {
             Atom::True => Ok(true),
             Atom::False => Ok(false),
             Atom::SubBexp(bexp) => Ok(bexp.eval(env)?),
+        }
+    }
+
+    pub fn vars(&self) -> HashSet<String> {
+        let vars = HashSet::new();
+        match self {
+            Atom::True => vars,
+            Atom::False => vars,
+            Atom::SubBexp(bool_expr) => bool_expr.vars(),
         }
     }
 }

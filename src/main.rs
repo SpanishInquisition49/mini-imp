@@ -13,9 +13,16 @@ use chumsky::{
 };
 use logos::Logos;
 
-use crate::modules::{control_flow_graph::ControlFlowGraph, lexer::Token, parser::parser};
+use crate::{
+    data_flow::{
+        code_analysis::{available_expr, defined, dominators, liveness, reaching, very_busy_expr},
+        control_flow_graph::ControlFlowGraph,
+    },
+    modules::{lexer::Token, parser::parser},
+};
 
 mod ast;
+mod data_flow;
 mod modules;
 
 fn main() {
@@ -50,7 +57,14 @@ fn main() {
 
     match parser().parse(token_stream).into_result() {
         Ok(p) => {
-            let cfg = ControlFlowGraph::from(&p);
+            let mut cfg = ControlFlowGraph::from(&p);
+            // NOTE: we perform static analysis here
+            dominators(&mut cfg);
+            liveness(&mut cfg);
+            defined(&mut cfg, p.input.clone());
+            reaching(&mut cfg, p.input.clone());
+            available_expr(&mut cfg);
+            very_busy_expr(&mut cfg);
             path.set_extension("dot");
             match fs::write(&path, cfg.to_dot()) {
                 Ok(_) => println!("Saved CFG to {}", path.to_string_lossy()),
