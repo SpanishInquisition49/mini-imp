@@ -1,20 +1,14 @@
-use std::{
-    any::TypeId,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 use crate::data_flow::{
-    annotations::{
-        AvailableExprAnnotation, DefinedVarsAnnotation, DominatorAnnotation, ExtendedExpr,
-        LivenessAnnotation, ReachingDefAnnotation, ReachingDefItem, VeryBusyExprAnnotation,
-    },
+    annotations::{ExtendedExpr, ReachingDefItem},
     control_flow_graph::ControlFlowGraph,
     graph_schema::{Code, NodeId},
 };
 
-pub fn dominators(cfg: &mut ControlFlowGraph) {
+pub fn dominators(cfg: &ControlFlowGraph) -> HashMap<NodeId, (HashSet<NodeId>, HashSet<NodeId>)> {
     let universe: HashSet<NodeId> = cfg.nodes.keys().copied().collect();
-    let dom = cfg.forward_worklist(
+    cfg.forward_worklist(
         universe.clone(),
         |ids| {
             let r#in: HashMap<NodeId, HashSet<NodeId>> =
@@ -29,30 +23,11 @@ pub fn dominators(cfg: &mut ControlFlowGraph) {
             dom_out
         },
         |a, b| a.intersection(b).cloned().collect(),
-    );
-
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (dom_in, dom_out) = dom.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<DominatorAnnotation>(),
-                Box::new(DominatorAnnotation {
-                    dom_in: dom_in.clone(),
-                    dom_out: dom_out.clone(),
-                }),
-            );
-    }
+    )
 }
 
-pub fn liveness(cfg: &mut ControlFlowGraph) {
-    let live = cfg.backward_worklist(
-        HashSet::new(),
+pub fn liveness(cfg: &ControlFlowGraph) -> HashMap<NodeId, (HashSet<String>, HashSet<String>)> {
+    cfg.backward_worklist(
         // NOTE: the initialization function that creates the in and out sets for each node
         |ids| {
             let r#in: HashMap<NodeId, HashSet<String>> =
@@ -78,30 +53,14 @@ pub fn liveness(cfg: &mut ControlFlowGraph) {
         },
         // NOTE: the meet function which is the union between in and out of the node
         |a, b| a.union(b).cloned().collect(),
-    );
-
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (live_in, live_out) = live.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<LivenessAnnotation>(),
-                Box::new(LivenessAnnotation {
-                    live_in: live_in.clone(),
-                    live_out: live_out.clone(),
-                }),
-            );
-    }
+    )
 }
 
-pub fn defined(cfg: &mut ControlFlowGraph, input: String) {
-    println!("Computing defined with in: '{input}'");
-    let defined = cfg.forward_worklist(
+pub fn defined(
+    cfg: &ControlFlowGraph,
+    input: String,
+) -> HashMap<NodeId, (HashSet<String>, HashSet<String>)> {
+    cfg.forward_worklist(
         // NOTE: the input variable is always defined
         HashSet::new(),
         |ids| {
@@ -138,29 +97,14 @@ pub fn defined(cfg: &mut ControlFlowGraph, input: String) {
         // NOTE: the meet function is the union between all pred of the current node
         // the reduce operation is done inside the skeleton
         |a, b| a.union(b).cloned().collect(),
-    );
-
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (def_in, def_out) = defined.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<DefinedVarsAnnotation>(),
-                Box::new(DefinedVarsAnnotation {
-                    def_in: def_in.clone(),
-                    def_out: def_out.clone(),
-                }),
-            );
-    }
+    )
 }
 
-pub fn reaching(cfg: &mut ControlFlowGraph, input: String) {
-    let reaching = cfg.forward_worklist(
+pub fn reaching(
+    cfg: &ControlFlowGraph,
+    input: String,
+) -> HashMap<NodeId, (HashSet<ReachingDefItem>, HashSet<ReachingDefItem>)> {
+    cfg.forward_worklist(
         // NOTE: the reaching definition of the input var at the start is defined
         // in the entry block
         HashSet::from([ReachingDefItem {
@@ -189,27 +133,12 @@ pub fn reaching(cfg: &mut ControlFlowGraph, input: String) {
         },
         // NOTE: the meet operator for the Reaching definitions is the union
         |a, b| a.union(b).cloned().collect(),
-    );
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (reach_in, reach_out) = reaching.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<ReachingDefAnnotation>(),
-                Box::new(ReachingDefAnnotation {
-                    reach_in: reach_in.clone(),
-                    reach_out: reach_out.clone(),
-                }),
-            );
-    }
+    )
 }
 
-pub fn available_expr(cfg: &mut ControlFlowGraph) {
+pub fn available_expr(
+    cfg: &ControlFlowGraph,
+) -> HashMap<NodeId, (HashSet<ExtendedExpr>, HashSet<ExtendedExpr>)> {
     let universe: HashSet<ExtendedExpr> = cfg.create_universe(|node| {
         if let Code::Assign(var, expr) = &node.code {
             Some(ExtendedExpr {
@@ -220,7 +149,7 @@ pub fn available_expr(cfg: &mut ControlFlowGraph) {
             None
         }
     });
-    let available = cfg.forward_worklist(
+    cfg.forward_worklist(
         universe.clone(),
         |ids| {
             let r#in: HashMap<NodeId, HashSet<ExtendedExpr>> = ids
@@ -266,28 +195,12 @@ pub fn available_expr(cfg: &mut ControlFlowGraph) {
         },
         // NOTE: the available expression meet operator is the intersection
         |a, b| a.intersection(b).cloned().collect(),
-    );
-
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (avail_in, avail_out) = available.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<AvailableExprAnnotation>(),
-                Box::new(AvailableExprAnnotation {
-                    avail_in: avail_in.clone(),
-                    avail_out: avail_out.clone(),
-                }),
-            );
-    }
+    )
 }
 
-pub fn very_busy_expr(cfg: &mut ControlFlowGraph) {
+pub fn very_busy_expr(
+    cfg: &ControlFlowGraph,
+) -> HashMap<NodeId, (HashSet<ExtendedExpr>, HashSet<ExtendedExpr>)> {
     let universe: HashSet<ExtendedExpr> = cfg.create_universe(|node| {
         if let Code::Assign(var, expr) = &node.code {
             Some(ExtendedExpr {
@@ -298,8 +211,7 @@ pub fn very_busy_expr(cfg: &mut ControlFlowGraph) {
             None
         }
     });
-    let busy = cfg.backward_worklist(
-        universe.clone(),
+    cfg.backward_worklist(
         |ids| {
             let r#in: HashMap<NodeId, HashSet<ExtendedExpr>> = ids
                 .iter()
@@ -342,22 +254,5 @@ pub fn very_busy_expr(cfg: &mut ControlFlowGraph) {
             busy_in
         },
         |a, b| a.intersection(b).cloned().collect(),
-    );
-    // Add the Annotation to the CFG nodes
-    let nodes: Vec<NodeId> = cfg.nodes.keys().copied().collect();
-    for node_id in nodes {
-        let (busy_in, busy_out) = busy.get(&node_id).unwrap();
-        cfg.nodes
-            .get_mut(&node_id)
-            .unwrap()
-            .annotations
-            .data
-            .insert(
-                TypeId::of::<VeryBusyExprAnnotation>(),
-                Box::new(VeryBusyExprAnnotation {
-                    busy_in: busy_in.clone(),
-                    busy_out: busy_out.clone(),
-                }),
-            );
-    }
+    )
 }

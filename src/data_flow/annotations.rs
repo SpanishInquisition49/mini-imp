@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
     collections::HashSet,
+    ops::Deref,
 };
 
 use indexmap::IndexMap;
@@ -31,22 +32,19 @@ impl std::fmt::Display for ExtendedExpr {
     }
 }
 
+/// Generic in/out annotation — all analyses share this structure.
 #[derive(Clone, Debug)]
-pub struct Annotations {
-    pub data: IndexMap<TypeId, Box<dyn AnnotationItem>>,
+pub struct Annotation<T> {
+    pub r#in: T,
+    pub out: T,
 }
 
-impl Annotations {
-    pub fn new() -> Self {
-        Annotations {
-            data: IndexMap::new(),
-        }
-    }
-}
-
-// NOTE: every annotation must implement this trait
-pub trait AnnotationItem: std::fmt::Display + std::fmt::Debug + AnnotationClone + Any {
+pub trait AnnotationItem:
+    std::fmt::Display + std::fmt::Debug + AnnotationClone + Any + Send + Sync
+{
     fn as_any(&self) -> &dyn Any;
+    fn get_in(&self) -> &dyn Any;
+    fn get_out(&self) -> &dyn Any;
 }
 
 pub trait AnnotationClone {
@@ -65,16 +63,106 @@ impl Clone for Box<dyn AnnotationItem> {
     }
 }
 
-fn format_set<T: std::fmt::Display>(set: &HashSet<T>) -> String {
-    if set.is_empty() {
-        "∅".to_string()
-    } else {
-        let mut out = String::from("{ ");
-        for item in set {
-            out.push_str(&format!("{item} "));
+/// Implements AnnotationItem, Deref, From<Annotation<T>>, and Display
+/// for a newtype wrapper around Annotation<T>.
+macro_rules! impl_annotation {
+    ($t:ty, $data_type:ty, $display_name:expr) => {
+        impl Deref for $t {
+            type Target = Annotation<$data_type>;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
         }
-        out.push('}');
-        out
+
+        impl From<Annotation<$data_type>> for $t {
+            fn from(a: Annotation<$data_type>) -> Self {
+                Self(a)
+            }
+        }
+
+        impl AnnotationItem for $t {
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn get_in(&self) -> &dyn Any {
+                &self.0.r#in
+            }
+            fn get_out(&self) -> &dyn Any {
+                &self.0.out
+            }
+        }
+
+        impl std::fmt::Display for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{}\nin: {}\nout: {}",
+                    $display_name,
+                    format_set(&self.0.r#in),
+                    format_set(&self.0.out),
+                )
+            }
+        }
+    };
+}
+
+#[derive(Clone, Debug)]
+pub struct LivenessAnnotation(pub Annotation<HashSet<String>>);
+
+#[derive(Clone, Debug)]
+pub struct DefinedVarsAnnotation(pub Annotation<HashSet<String>>);
+
+#[derive(Clone, Debug)]
+pub struct ReachingDefAnnotation(pub Annotation<HashSet<ReachingDefItem>>);
+
+#[derive(Clone, Debug)]
+pub struct AvailableExprAnnotation(pub Annotation<HashSet<ExtendedExpr>>);
+
+#[derive(Clone, Debug)]
+pub struct VeryBusyExprAnnotation(pub Annotation<HashSet<ExtendedExpr>>);
+
+#[derive(Clone, Debug)]
+pub struct DominatorAnnotation(pub Annotation<HashSet<NodeId>>);
+
+impl_annotation!(LivenessAnnotation, HashSet<String>, "Live Variables");
+impl_annotation!(DefinedVarsAnnotation, HashSet<String>, "Defined Variables");
+impl_annotation!(
+    ReachingDefAnnotation,
+    HashSet<ReachingDefItem>,
+    "Reaching Definitions"
+);
+impl_annotation!(
+    AvailableExprAnnotation,
+    HashSet<ExtendedExpr>,
+    "Available Expressions"
+);
+impl_annotation!(
+    VeryBusyExprAnnotation,
+    HashSet<ExtendedExpr>,
+    "Very Busy Expressions"
+);
+impl_annotation!(DominatorAnnotation, HashSet<NodeId>, "Dominator");
+
+#[derive(Clone, Debug)]
+pub struct Annotations {
+    pub data: IndexMap<TypeId, Box<dyn AnnotationItem>>,
+}
+
+impl Annotations {
+    pub fn new() -> Self {
+        Annotations {
+            data: IndexMap::new(),
+        }
+    }
+
+    pub fn insert<A: AnnotationItem + Clone + 'static>(&mut self, annotation: A) {
+        self.data.insert(TypeId::of::<A>(), Box::new(annotation));
+    }
+
+    pub fn get<A: AnnotationItem + 'static>(&self) -> Option<&A> {
+        self.data
+            .get(&TypeId::of::<A>())
+            .and_then(|a| a.as_any().downcast_ref::<A>())
     }
 }
 
@@ -88,140 +176,15 @@ impl std::fmt::Display for Annotations {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct LivenessAnnotation {
-    pub live_in: HashSet<String>,
-    pub live_out: HashSet<String>,
-}
-
-impl AnnotationItem for LivenessAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for LivenessAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Live Variables\nin: {}\nout: {}",
-            format_set(&self.live_in),
-            format_set(&self.live_out),
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ReachingDefAnnotation {
-    pub reach_in: HashSet<ReachingDefItem>,
-    pub reach_out: HashSet<ReachingDefItem>,
-}
-
-impl AnnotationItem for ReachingDefAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for ReachingDefAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Reaching Definitions\nin: {}\nout: {}",
-            format_set(&self.reach_in),
-            format_set(&self.reach_out),
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DefinedVarsAnnotation {
-    pub def_in: HashSet<String>,
-    pub def_out: HashSet<String>,
-}
-
-impl AnnotationItem for DefinedVarsAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for DefinedVarsAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Defined Variables\nin: {}\nout: {}",
-            format_set(&self.def_in),
-            format_set(&self.def_out),
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct AvailableExprAnnotation {
-    pub avail_in: HashSet<ExtendedExpr>,
-    pub avail_out: HashSet<ExtendedExpr>,
-}
-
-impl AnnotationItem for AvailableExprAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for AvailableExprAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Available Expressions\nin: {}\nout: {}",
-            format_set(&self.avail_in),
-            format_set(&self.avail_out)
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VeryBusyExprAnnotation {
-    pub busy_in: HashSet<ExtendedExpr>,
-    pub busy_out: HashSet<ExtendedExpr>,
-}
-
-impl AnnotationItem for VeryBusyExprAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for VeryBusyExprAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Very Busy Expressions\nin: {}\nout: {}",
-            format_set(&self.busy_in),
-            format_set(&self.busy_out)
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DominatorAnnotation {
-    pub dom_in: HashSet<NodeId>,
-    pub dom_out: HashSet<NodeId>,
-}
-
-impl AnnotationItem for DominatorAnnotation {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl std::fmt::Display for DominatorAnnotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Dominator\nin: {}\nout: {}",
-            format_set(&self.dom_in),
-            format_set(&self.dom_out)
-        )
+fn format_set<T: std::fmt::Display>(set: &HashSet<T>) -> String {
+    if set.is_empty() {
+        "∅".to_string()
+    } else {
+        let mut out = String::from("{ ");
+        for item in set {
+            out.push_str(&format!("{item} "));
+        }
+        out.push('}');
+        out
     }
 }

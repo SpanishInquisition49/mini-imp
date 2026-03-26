@@ -1,8 +1,10 @@
+use std::sync::Mutex;
 use std::{
     env,
     fs::{self},
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
 };
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
@@ -15,6 +17,10 @@ use logos::Logos;
 
 use crate::{
     data_flow::{
+        annotations::{
+            AvailableExprAnnotation, DefinedVarsAnnotation, DominatorAnnotation,
+            LivenessAnnotation, ReachingDefAnnotation, VeryBusyExprAnnotation,
+        },
         code_analysis::{available_expr, defined, dominators, liveness, reaching, very_busy_expr},
         control_flow_graph::ControlFlowGraph,
     },
@@ -25,7 +31,8 @@ mod ast;
 mod data_flow;
 mod modules;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 3 {
@@ -58,13 +65,44 @@ fn main() {
     match parser().parse(token_stream).into_result() {
         Ok(p) => {
             let mut cfg = ControlFlowGraph::from(&p);
-            // NOTE: we perform static analysis here
-            dominators(&mut cfg);
-            liveness(&mut cfg);
-            defined(&mut cfg, p.input.clone());
-            reaching(&mut cfg, p.input.clone());
-            available_expr(&mut cfg);
-            very_busy_expr(&mut cfg);
+            let cfg_ref = Arc::new(cfg.clone());
+
+            let (dom, live, def, reach, avail_exp, busy_exp) = tokio::join!(
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    async move { dominators(&cfg) }
+                }),
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    async move { liveness(&cfg) }
+                }),
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    let input = p.input.clone();
+                    async move { defined(&cfg, input) }
+                }),
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    let input = p.input.clone();
+                    async move { reaching(&cfg, input) }
+                }),
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    async move { available_expr(&cfg) }
+                }),
+                tokio::spawn({
+                    let cfg = cfg_ref.clone();
+                    async move { very_busy_expr(&cfg) }
+                })
+            );
+
+            cfg.add_annotation::<LivenessAnnotation, _>(live.unwrap());
+            cfg.add_annotation::<DefinedVarsAnnotation, _>(def.unwrap());
+            cfg.add_annotation::<ReachingDefAnnotation, _>(reach.unwrap());
+            cfg.add_annotation::<AvailableExprAnnotation, _>(avail_exp.unwrap());
+            cfg.add_annotation::<VeryBusyExprAnnotation, _>(busy_exp.unwrap());
+            cfg.add_annotation::<DominatorAnnotation, _>(dom.unwrap());
+
             path.set_extension("dot");
             match fs::write(&path, cfg.to_dot()) {
                 Ok(_) => println!("Saved CFG to {}", path.to_string_lossy()),

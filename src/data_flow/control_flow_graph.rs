@@ -6,7 +6,7 @@ use std::{
 use crate::{
     ast::cmd::{AtomCmd, Cmd},
     data_flow::{
-        annotations::Annotations,
+        annotations::{Annotation, AnnotationItem, Annotations},
         graph_schema::{Code, Edge, Node, NodeId},
     },
     modules::program::Program,
@@ -83,7 +83,6 @@ impl ControlFlowGraph {
 
     pub fn backward_worklist<T, I, F, M>(
         &self,
-        default: T,
         init: I,
         transfer: F,
         meet: M,
@@ -125,6 +124,20 @@ impl ControlFlowGraph {
             .keys()
             .map(|id| (*id, (r#in[id].clone(), out[id].clone())))
             .collect()
+    }
+
+    pub fn add_annotation<A, T>(&mut self, annotation: HashMap<NodeId, (T, T)>)
+    where
+        A: AnnotationItem + From<Annotation<T>> + Clone + 'static,
+        T: Clone,
+    {
+        for (node_id, (r#in, out)) in annotation {
+            self.nodes
+                .get_mut(&node_id)
+                .unwrap()
+                .annotations
+                .insert(A::from(Annotation { r#in, out }));
+        }
     }
 
     pub fn create_universe<F, T>(&self, filter_fun: F) -> HashSet<T>
