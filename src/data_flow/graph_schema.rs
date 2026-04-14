@@ -1,6 +1,6 @@
 use crate::{
     ast::{boolean_exp::BoolExpr, expr::Expr},
-    data_flow::annotations::Annotations,
+    data_flow::annotations::{AnnotationItem, Annotations},
 };
 use std::collections::HashSet;
 
@@ -46,5 +46,13 @@ impl Node {
             // NOTE: this case should be impossible
             self.pred = Some(HashSet::from([id]));
         }
+    }
+
+    pub fn get_annotation<A: AnnotationItem + 'static>(&self) -> Option<&A> {
+        self.annotations.get::<A>()
+    }
+
+    pub fn get_annotation_mut<A: AnnotationItem + 'static>(&mut self) -> Option<&mut A> {
+        self.annotations.get_mut::<A>()
     }
 }

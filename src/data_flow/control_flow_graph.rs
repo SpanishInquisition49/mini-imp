@@ -1,7 +1,10 @@
 use std::{
+    any::TypeId,
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
 };
+
+use chumsky::{container::Seq, span::SimpleSpan};
 
 use crate::{
     ast::cmd::{AtomCmd, Cmd},
@@ -15,6 +18,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct ControlFlowGraph {
     pub nodes: HashMap<NodeId, Node>,
+    pub spans: HashMap<NodeId, SimpleSpan>,
     pub entry: NodeId,
     pub r#final: NodeId,
     next_id: NodeId,
@@ -24,6 +28,7 @@ impl ControlFlowGraph {
     pub fn new() -> Self {
         ControlFlowGraph {
             nodes: HashMap::new(),
+            spans: HashMap::new(),
             entry: 0,
             r#final: 0,
             next_id: 0,
@@ -136,8 +141,38 @@ impl ControlFlowGraph {
                 .get_mut(&node_id)
                 .unwrap()
                 .annotations
-                .insert(A::from(Annotation { r#in, out }));
+                .insert(A::from(Annotation {
+                    r#in,
+                    out,
+                    dirty: false, // By default the annotation is not dirty
+                }));
         }
+    }
+
+    pub fn has_annotation<A: AnnotationItem + 'static>(&self) -> bool {
+        // NOTE: since if a node has the given annotation, then every node have it
+        self.nodes
+            .values()
+            .any(|node| node.annotations.data.contains_key(&TypeId::of::<A>()))
+    }
+
+    pub fn is_dirty<A: AnnotationItem + 'static>(&self) -> bool {
+        self.nodes.iter().any(|(_, n)| {
+            if let Some(annotation) = n.get_annotation::<A>() {
+                annotation.is_dirty()
+            } else {
+                // TODO: consider changing this to Err
+                false
+            }
+        })
+    }
+
+    pub fn mark_dirty<A: AnnotationItem + 'static>(&mut self) {
+        self.nodes.iter_mut().for_each(|(_, n)| {
+            if let Some(annotation) = n.get_annotation_mut::<A>() {
+                annotation.mark_dirty();
+            }
+        });
     }
 
     pub fn create_universe<F, T>(&self, filter_fun: F) -> HashSet<T>
@@ -179,8 +214,9 @@ impl ControlFlowGraph {
     fn sub_build(&mut self, cmd: &AtomCmd, pred: Option<HashSet<NodeId>>) -> (NodeId, NodeId) {
         match cmd {
             AtomCmd::Block(cmd) => self.build(cmd, pred),
-            AtomCmd::Assign(var, expr) => {
+            AtomCmd::Assign(var, expr, span) => {
                 let id = self.add_node(Code::Assign(var.clone(), expr.clone()), Edge::Bottom, pred);
+                self.spans.insert(id, *span);
                 (id, id)
             }
             AtomCmd::Ite(guard, true_branch, false_branch) => {
@@ -199,6 +235,7 @@ impl ControlFlowGraph {
                     Edge::Branch(e_true, e_false),
                     Some(HashSet::from([start])),
                 );
+                self.spans.insert(guard_id, guard.span());
 
                 // Here we update the next properties of the nodes
                 self.nodes.get_mut(&e_true).unwrap().pred = Some(HashSet::from([guard_id]));
@@ -223,6 +260,7 @@ impl ControlFlowGraph {
                     Edge::Branch(e_body, join),
                     Some(HashSet::from([start, f_body])),
                 );
+                self.spans.insert(guard_id, guard.span());
 
                 // we replace the Bottom with the start of the loop in the body CFG
                 self.nodes.get_mut(&start).unwrap().next = Edge::Next(guard_id);
@@ -259,7 +297,6 @@ impl ControlFlowGraph {
     /// Remove all the superfluous skip from the CFG
     /// preserving the CFG definition
     pub fn minimise(&mut self) {
-        // NOTE:
         // Helper function used to get the real successor of a node
         let successor = |nodes: &HashMap<NodeId, Node>, mut id: NodeId| {
             while let Some(node) = nodes.get(&id) {
@@ -275,7 +312,6 @@ impl ControlFlowGraph {
             }
             id
         };
-
         let ids: Vec<NodeId> = self.nodes.keys().copied().collect();
         for id in ids {
             let next_new = match self.nodes[&id].next.clone() {
@@ -302,12 +338,30 @@ impl ControlFlowGraph {
             self.nodes.get_mut(&id).unwrap().next = next_new;
         }
 
+        let old_entry = self.entry;
+        let new_entry = if let Some(entry_node) = self.nodes.get(&old_entry) {
+            if entry_node.is_removable() {
+                if let Edge::Next(succ) = entry_node.next {
+                    succ
+                } else {
+                    old_entry
+                }
+            } else {
+                old_entry
+            }
+        } else {
+            old_entry
+        };
         // sweep all the removable nodes
         self.nodes
-            .retain(|id, node| !node.is_removable() || *id == self.entry || *id == self.r#final);
+            .retain(|id, node| !node.is_removable() || *id == self.r#final);
+
+        // Aggiorna entry dopo il retain
+        if !self.nodes.contains_key(&old_entry) && self.nodes.contains_key(&new_entry) {
+            self.entry = new_entry;
+        }
         let remaining: Vec<NodeId> = self.nodes.keys().copied().collect();
         for (_, n) in self.nodes.iter_mut() {
-            // sweep all the predecessors that does not exists anymore
             if let Some(ids) = n.pred.as_mut() {
                 ids.retain(|id| remaining.contains(id));
             }

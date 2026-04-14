@@ -1,10 +1,27 @@
 use std::collections::{HashMap, HashSet};
 
+use chumsky::span::SimpleSpan;
+
 use crate::data_flow::{
-    annotations::{ExtendedExpr, ReachingDefItem},
+    annotations::{DefinedVarsAnnotation, ExtendedExpr, ReachingDefItem},
     control_flow_graph::ControlFlowGraph,
     graph_schema::{Code, NodeId},
 };
+
+pub enum AnnotationComputeResult {
+    Liveness(HashMap<NodeId, (HashSet<String>, HashSet<String>)>),
+    DefinedVars(HashMap<NodeId, (HashSet<String>, HashSet<String>)>),
+    ReachingDef(HashMap<NodeId, (HashSet<ReachingDefItem>, HashSet<ReachingDefItem>)>),
+    AvailableExpr(HashMap<NodeId, (HashSet<ExtendedExpr>, HashSet<ExtendedExpr>)>),
+    VeryBusyExpr(HashMap<NodeId, (HashSet<ExtendedExpr>, HashSet<ExtendedExpr>)>),
+    Dominators(HashMap<NodeId, (HashSet<NodeId>, HashSet<NodeId>)>),
+}
+
+#[derive(Clone, Debug)]
+pub struct UndefinedVarError {
+    pub var_name: String,
+    pub locations: Vec<SimpleSpan>,
+}
 
 pub fn dominators(cfg: &ControlFlowGraph) -> HashMap<NodeId, (HashSet<NodeId>, HashSet<NodeId>)> {
     let universe: HashSet<NodeId> = cfg.nodes.keys().copied().collect();
@@ -26,14 +43,21 @@ pub fn dominators(cfg: &ControlFlowGraph) -> HashMap<NodeId, (HashSet<NodeId>, H
     )
 }
 
-pub fn liveness(cfg: &ControlFlowGraph) -> HashMap<NodeId, (HashSet<String>, HashSet<String>)> {
+pub fn liveness(
+    cfg: &ControlFlowGraph,
+    output: String,
+) -> HashMap<NodeId, (HashSet<String>, HashSet<String>)> {
     cfg.backward_worklist(
         // NOTE: the initialization function that creates the in and out sets for each node
         |ids| {
-            let r#in: HashMap<NodeId, HashSet<String>> =
-                ids.iter().map(|id| (*id, HashSet::new())).collect();
-            let out: HashMap<NodeId, HashSet<String>> =
-                ids.iter().map(|id| (*id, HashSet::new())).collect();
+            let r#in: HashMap<NodeId, HashSet<String>> = ids
+                .iter()
+                .map(|id| (*id, HashSet::from([output.clone()])))
+                .collect();
+            let out: HashMap<NodeId, HashSet<String>> = ids
+                .iter()
+                .map(|id| (*id, HashSet::from([output.clone()])))
+                .collect();
             (r#in, out)
         },
         // NOTE: the transfer function that compute the new live_in of the node
@@ -60,9 +84,17 @@ pub fn defined(
     cfg: &ControlFlowGraph,
     input: String,
 ) -> HashMap<NodeId, (HashSet<String>, HashSet<String>)> {
+    let mut universe = cfg.create_universe(|node| {
+        if let Code::Assign(var, _) = &node.code {
+            Some(var.clone())
+        } else {
+            None
+        }
+    });
+    universe.insert(input.clone());
     cfg.forward_worklist(
         // NOTE: the input variable is always defined
-        HashSet::new(),
+        universe.clone(),
         |ids| {
             let r#in: HashMap<NodeId, HashSet<String>> = ids
                 .iter()
@@ -70,7 +102,7 @@ pub fn defined(
                     if *id == cfg.entry {
                         (*id, HashSet::from([input.clone()]))
                     } else {
-                        (*id, HashSet::new())
+                        (*id, universe.clone())
                     }
                 })
                 .collect();
@@ -80,7 +112,7 @@ pub fn defined(
                     if *id == cfg.entry {
                         (*id, HashSet::from([input.clone()]))
                     } else {
-                        (*id, HashSet::new())
+                        (*id, universe.clone())
                     }
                 })
                 .collect();
@@ -94,9 +126,9 @@ pub fn defined(
             }
             def_out
         },
-        // NOTE: the meet function is the union between all pred of the current node
+        // NOTE: the meet function is the intersection between all pred of the current node
         // the reduce operation is done inside the skeleton
-        |a, b| a.union(b).cloned().collect(),
+        |a, b| a.intersection(b).cloned().collect(),
     )
 }
 
@@ -255,4 +287,57 @@ pub fn very_busy_expr(
         },
         |a, b| a.intersection(b).cloned().collect(),
     )
+}
+
+pub fn check_undefined(
+    cfg: &mut ControlFlowGraph,
+    input: String,
+) -> Result<(), Vec<UndefinedVarError>> {
+    if !cfg.has_annotation::<DefinedVarsAnnotation>() {
+        // NOTE: We add the defined variable annotation to the CFG
+        let def = defined(cfg, input);
+        cfg.add_annotation::<DefinedVarsAnnotation, _>(def);
+    }
+
+    let mut errors: HashMap<String, Vec<SimpleSpan>> = HashMap::new();
+
+    for (node_id, node) in &cfg.nodes {
+        // NOTE: We can safely unwrap
+        let defined = node.get_annotation::<DefinedVarsAnnotation>().unwrap();
+        let span = cfg.spans.get(node_id).copied();
+        match &node.code {
+            Code::Assign(_, exp) => {
+                for v in exp.vars() {
+                    if !defined.r#in.contains(&v) {
+                        // NOTE: again, we can unwrap because only skip don't have Span
+                        errors.entry(v).or_insert_with(Vec::new).push(span.unwrap());
+                    }
+                }
+            }
+            Code::Guard(bexp) => {
+                for v in bexp.vars() {
+                    if !defined.r#in.contains(&v) {
+                        errors.entry(v).or_insert_with(Vec::new).push(span.unwrap());
+                    }
+                }
+            }
+            Code::Skip => (),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let result = errors
+            .into_iter()
+            .map(|(var_name, mut locations)| {
+                locations.sort_by_key(|s| s.start);
+                UndefinedVarError {
+                    var_name,
+                    locations,
+                }
+            })
+            .collect();
+        Err(result)
+    }
 }

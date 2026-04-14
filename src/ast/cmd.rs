@@ -1,3 +1,5 @@
+use chumsky::span::SimpleSpan;
+
 use crate::{
     ast::{boolean_exp::BoolExpr, expr::Expr},
     modules::eval::{Env, EvalError},
@@ -24,7 +26,7 @@ impl Cmd {
 #[derive(Debug, Clone)]
 pub enum AtomCmd {
     Block(Box<Cmd>),
-    Assign(String, Box<Expr>),
+    Assign(String, Box<Expr>, SimpleSpan),
     Ite(Box<BoolExpr>, Box<AtomCmd>, Box<AtomCmd>),
     While(Box<BoolExpr>, Box<AtomCmd>),
     Print(Box<Expr>),
@@ -34,7 +36,7 @@ pub enum AtomCmd {
 impl AtomCmd {
     pub fn eval(&self, env: &mut Env) -> Result<(), EvalError> {
         match self {
-            AtomCmd::Assign(v, expr) => {
+            AtomCmd::Assign(v, expr, _) => {
                 let val = expr.eval(env)?;
                 env.insert(v.clone(), val);
                 Ok(())

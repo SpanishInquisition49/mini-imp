@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::modules::eval::{Env, EvalError};
 
@@ -35,6 +35,128 @@ impl Expr {
             }
         };
         vars
+    }
+
+    pub fn extract_const(&self) -> Option<i64> {
+        match self {
+            Expr::Term(term) => term.extract_const(),
+            _ => None,
+        }
+    }
+
+    pub fn propagate_const(&self, constant_map: &HashMap<String, i64>) -> Option<Expr> {
+        match self {
+            Expr::Add(left, right) => match (
+                left.propagate_const(constant_map),
+                right.propagate_const(constant_map),
+            ) {
+                (None, None) => None,
+                (None, Some(right_p)) => Some(Expr::Add(left.clone(), Box::new(right_p))),
+                (Some(left_p), None) => Some(Expr::Add(Box::new(left_p), right.clone())),
+                (Some(left_p), Some(right_p)) => {
+                    Some(Expr::Add(Box::new(left_p), Box::new(right_p)))
+                }
+            },
+            Expr::Sub(left, right) => match (
+                left.propagate_const(constant_map),
+                right.propagate_const(constant_map),
+            ) {
+                (None, None) => None,
+                (None, Some(right_p)) => Some(Expr::Sub(left.clone(), Box::new(right_p))),
+                (Some(left_p), None) => Some(Expr::Sub(Box::new(left_p), right.clone())),
+                (Some(left_p), Some(right_p)) => {
+                    Some(Expr::Sub(Box::new(left_p), Box::new(right_p)))
+                }
+            },
+
+            Expr::Term(term) => term
+                .propagate_const(constant_map)
+                .map(|term_p| Expr::Term(Box::new(term_p))),
+        }
+    }
+
+    pub fn fold(&self) -> (Expr, bool) {
+        match self {
+            Expr::Add(left, right) => {
+                let (left_exp, left_change) = left.fold();
+                let (right_term, right_change) = right.fold();
+
+                if right_term.is_zero() {
+                    return (left_exp, true);
+                }
+
+                if left_exp.is_zero() {
+                    return (Expr::Term(Box::new(right_term)), true);
+                }
+
+                if let Some(result) = Self::try_fold_add(&left_exp, &right_term) {
+                    return (
+                        Expr::Term(Box::new(Term::Fac(Box::new(Factor::Int(result))))),
+                        true,
+                    );
+                }
+
+                (
+                    Expr::Add(Box::new(left_exp), Box::new(right_term)),
+                    left_change || right_change,
+                )
+            }
+            Expr::Sub(left, right) => {
+                let (left_exp, left_change) = left.fold();
+                let (right_term, right_change) = right.fold();
+
+                if right_term.is_zero() {
+                    return (left_exp, true);
+                }
+
+                if let Some(result) = Self::try_fold_sub(&left_exp, &right_term) {
+                    return (
+                        Expr::Term(Box::new(Term::Fac(Box::new(Factor::Int(result))))),
+                        true,
+                    );
+                }
+
+                (
+                    Expr::Sub(Box::new(left_exp), Box::new(right_term)),
+                    left_change || right_change,
+                )
+            }
+            Expr::Term(term) => {
+                let (term_f, term_c) = term.fold();
+
+                (Expr::Term(Box::new(term_f)), term_c)
+            }
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        if let Expr::Term(t) = self {
+            t.is_zero()
+        } else {
+            false
+        }
+    }
+
+    fn try_fold_add(left: &Expr, right: &Term) -> Option<i64> {
+        if let (Expr::Term(l_term), Term::Fac(r_fac)) = (left, right)
+            && let (Term::Fac(l_fac), Factor::Int(r)) = (&**l_term, &**r_fac)
+            && let Factor::Int(l) = &**l_fac
+        {
+            Some(l + r)
+        } else {
+            None
+        }
+    }
+
+    fn try_fold_sub(left: &Expr, right: &Term) -> Option<i64> {
+        if let (Expr::Term(l_term), Term::Fac(r_fac)) = (left, right)
+            && let (Term::Fac(l_fac), Factor::Int(r)) = (&**l_term, &**r_fac)
+            && let Factor::Int(l) = &**l_fac
+        {
+            Some(l - r)
+        } else {
+            None
+        }
     }
 }
 
@@ -76,6 +198,94 @@ impl Term {
             }
         }
     }
+
+    pub fn extract_const(&self) -> Option<i64> {
+        match self {
+            Term::Fac(factor) => factor.extract_const(),
+            _ => None,
+        }
+    }
+
+    pub fn propagate_const(&self, constant_map: &HashMap<String, i64>) -> Option<Term> {
+        match self {
+            Term::Mul(left, right) => match (
+                left.propagate_const(constant_map),
+                right.propagate_const(constant_map),
+            ) {
+                (None, None) => None,
+                (None, Some(right_p)) => Some(Term::Mul(left.clone(), Box::new(right_p))),
+                (Some(left_p), None) => Some(Term::Mul(Box::new(left_p), right.clone())),
+                (Some(left_p), Some(right_p)) => {
+                    Some(Term::Mul(Box::new(left_p), Box::new(right_p)))
+                }
+            },
+            Term::Fac(factor) => factor
+                .propagate_const(constant_map)
+                .map(|factor_p| Term::Fac(Box::new(factor_p))),
+        }
+    }
+
+    pub fn fold(&self) -> (Term, bool) {
+        match self {
+            Term::Mul(term, factor) => {
+                let (term_f, term_c) = term.fold();
+                let (fact_f, fact_c) = factor.fold();
+
+                if term_f.is_zero() {
+                    return (Term::Fac(Box::new(Factor::Int(0))), true);
+                }
+
+                if fact_f.is_zero() {
+                    return (Term::Fac(Box::new(Factor::Int(0))), true);
+                }
+
+                if term_f.is_one() {
+                    return (Term::Fac(Box::new(fact_f)), true);
+                }
+
+                if fact_f.is_one() {
+                    return (term_f, true);
+                }
+
+                if let Some(result) = Self::try_fold_mul(&term_f, &fact_f) {
+                    return (Term::Fac(Box::new(Factor::Int(result))), true);
+                }
+
+                (
+                    Term::Mul(Box::new(term_f), Box::new(fact_f)),
+                    term_c || fact_c,
+                )
+            }
+            Term::Fac(factor) => {
+                let (f, c) = factor.fold();
+                (Term::Fac(Box::new(f)), c)
+            }
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Term::Mul(_, _) => false,
+            Term::Fac(factor) => factor.is_zero(),
+        }
+    }
+
+    pub fn is_one(&self) -> bool {
+        match self {
+            Term::Mul(_, _) => false,
+            Term::Fac(factor) => factor.is_one(),
+        }
+    }
+
+    fn try_fold_mul(left: &Term, right: &Factor) -> Option<i64> {
+        if let (Term::Fac(l_fac), Factor::Int(r)) = (left, right)
+            && let Factor::Int(l) = &**l_fac
+        {
+            Some(l * r)
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for Term {
@@ -115,6 +325,57 @@ impl Factor {
             }
             Factor::Int(_) => vars,
             Factor::SubExp(expr) => expr.vars(),
+        }
+    }
+
+    pub fn extract_const(&self) -> Option<i64> {
+        match self {
+            Factor::Int(c) => Some(*c),
+            _ => None,
+        }
+    }
+
+    pub fn propagate_const(&self, constant_map: &HashMap<String, i64>) -> Option<Factor> {
+        match self {
+            Factor::Var(v) => constant_map.get(v).map(|c| Factor::Int(*c)),
+            Factor::Int(_) => None,
+            Factor::SubExp(expr) => expr
+                .propagate_const(constant_map)
+                .map(|expr_p| Factor::SubExp(Box::new(expr_p))),
+        }
+    }
+
+    pub fn fold(&self) -> (Factor, bool) {
+        match self {
+            Factor::SubExp(expr) => {
+                let (f, c) = expr.fold();
+
+                // Extract (5 + 0) to 5
+                if let Expr::Term(t) = &f
+                    && let Term::Fac(inner_f) = &**t
+                {
+                    return (*inner_f.clone(), true);
+                }
+
+                (Factor::SubExp(Box::new(f)), c)
+            }
+            _ => (self.clone(), false),
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Factor::Var(_) => false,
+            Factor::Int(f) => *f == 0,
+            Factor::SubExp(_) => false,
+        }
+    }
+
+    pub fn is_one(&self) -> bool {
+        match self {
+            Factor::Var(_) => false,
+            Factor::Int(f) => *f == 1,
+            Factor::SubExp(_) => false,
         }
     }
 }

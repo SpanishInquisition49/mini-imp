@@ -62,33 +62,38 @@ where
         let base = choice((
             just(Token::Not)
                 .ignore_then(bexp.clone())
-                .map(|b| BoolExpr::Not(Box::new(b))),
+                .map_with(|b, span| BoolExpr::Not(Box::new(b), span.span())),
             expr.clone()
                 .then_ignore(just(Token::LowerThan))
                 .then(expr.clone())
-                .map(|(l, r)| BoolExpr::LowerThan(Box::new(l), Box::new(r))),
+                .map_with(|(l, r), span| {
+                    BoolExpr::LowerThan(Box::new(l), Box::new(r), span.span())
+                }),
             expr.clone()
                 .then_ignore(just(Token::GreaterThan))
                 .then(expr.clone())
-                .map(|(l, r)| BoolExpr::GreaterThan(Box::new(l), Box::new(r))),
-            atom.clone().map(|a| BoolExpr::Atom(Box::new(a))),
+                .map_with(|(l, r), span| {
+                    BoolExpr::GreaterThan(Box::new(l), Box::new(r), span.span())
+                }),
+            atom.clone()
+                .map_with(|a, span| BoolExpr::Atom(Box::new(a), span.span())),
         ));
 
         base.foldl(
             choice((
                 just(Token::And)
                     .ignore_then(atom.clone())
-                    .map(|a| (true, a)),
+                    .map_with(|a, span| (true, a, span.span())),
                 just(Token::Or)
                     .ignore_then(atom.clone())
-                    .map(|a| (false, a)),
+                    .map_with(|a, span| (false, a, span.span())),
             ))
             .repeated(),
-            |l, (is_and, r)| {
+            |l, (is_and, r, span)| {
                 if is_and {
-                    BoolExpr::And(Box::new(l), Box::new(r))
+                    BoolExpr::And(Box::new(l), Box::new(r), span)
                 } else {
-                    BoolExpr::Or(Box::new(l), Box::new(r))
+                    BoolExpr::Or(Box::new(l), Box::new(r), span)
                 }
             },
         )
@@ -102,10 +107,9 @@ where
                 .map(|c| AtomCmd::Block(Box::new(c)));
 
             let assign = var
-                .clone()
                 .then_ignore(just(Token::Assign))
                 .then(expr.clone())
-                .map(|(v, e)| AtomCmd::Assign(v, Box::new(e)));
+                .map_with(|(v, exp), e| AtomCmd::Assign(v, Box::new(exp), e.span()));
 
             let if_cmd = just(Token::If)
                 .ignore_then(bexp.clone())
